@@ -7,8 +7,12 @@ import com.roomrental.modules.auth.infrastructure.entity.UserEntity;
 import com.roomrental.modules.auth.infrastructure.repository.UserJpaRepository;
 import com.roomrental.modules.resident.application.dto.ResidentCreateCommand;
 import com.roomrental.modules.resident.application.dto.ResidentResult;
+import com.roomrental.modules.resident.application.event.ResidentCreatedEvent;
+import com.roomrental.modules.resident.application.event.ResidentDeactivatedEvent;
+import com.roomrental.modules.resident.application.event.ResidentReactivatedEvent;
 import com.roomrental.modules.resident.infrastructure.entity.ResidentProfileEntity;
 import com.roomrental.modules.resident.infrastructure.repository.ResidentProfileJpaRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -28,15 +32,18 @@ public class ResidentService {
     private final UserJpaRepository userJpaRepository;
     private final ResidentProfileJpaRepository profileRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ResidentService(
             UserJpaRepository userJpaRepository,
             ResidentProfileJpaRepository profileRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.userJpaRepository = userJpaRepository;
         this.profileRepository = profileRepository;
         this.passwordEncoder = passwordEncoder;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -68,7 +75,11 @@ public class ResidentService {
                 profile.setIdCardBackUrl(command.idCardBackUrl());
                 profileRepository.save(profile);
 
-                return toResult(user, profile);
+                ResidentResult result = toResult(user, profile);
+                eventPublisher.publishEvent(new ResidentReactivatedEvent(
+                        tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                        result.userId()));
+                return result;
             }
             // If ACTIVE, throw conflict
             throw new BaseException(HttpStatus.CONFLICT, "PHONE_EXISTS", "Phone already registered");
@@ -97,7 +108,11 @@ public class ResidentService {
         profile.setIdCardBackUrl(command.idCardBackUrl());
         profileRepository.save(profile);
 
-        return toResult(user, profile);
+        ResidentResult result = toResult(user, profile);
+        eventPublisher.publishEvent(new ResidentCreatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.userId(), result.fullName()));
+        return result;
     }
 
     /**
@@ -135,8 +150,13 @@ public class ResidentService {
         UserEntity user = userJpaRepository.findById(residentId)
                 .filter(u -> tenantId.equals(u.getTenantId()) && "RESIDENT".equals(u.getRole()))
                 .orElseThrow(() -> BaseException.notFound("Resident", residentId));
+        String oldStatus = user.getStatus();
         user.setStatus("INACTIVE");
         userJpaRepository.save(user);
+
+        eventPublisher.publishEvent(new ResidentDeactivatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                residentId, oldStatus));
     }
 
     private ResidentResult toResult(UserEntity user, ResidentProfileEntity profile) {

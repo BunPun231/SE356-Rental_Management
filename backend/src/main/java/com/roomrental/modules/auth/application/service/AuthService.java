@@ -5,6 +5,10 @@ import com.roomrental.common.security.JwtTokenService;
 import com.roomrental.modules.auth.application.dto.AuthResult;
 import com.roomrental.modules.auth.application.dto.LoginCommand;
 import com.roomrental.modules.auth.application.dto.RegisterCommand;
+import com.roomrental.modules.auth.application.event.ManagerRegisteredEvent;
+import com.roomrental.modules.auth.application.event.PasswordChangedEvent;
+import com.roomrental.modules.auth.application.event.PasswordResetEvent;
+import com.roomrental.modules.auth.application.event.UserLoggedInEvent;
 import com.roomrental.modules.auth.domain.model.Tenant;
 import com.roomrental.modules.auth.domain.model.TenantStatus;
 import com.roomrental.modules.auth.domain.model.User;
@@ -12,6 +16,7 @@ import com.roomrental.modules.auth.domain.model.UserRole;
 import com.roomrental.modules.auth.domain.model.UserStatus;
 import com.roomrental.modules.auth.domain.repository.TenantRepository;
 import com.roomrental.modules.auth.domain.repository.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -32,17 +37,26 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
+    private final PasswordHistoryService passwordHistoryService;
+    private final org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AuthService(
             TenantRepository tenantRepository,
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
-            JwtTokenService jwtTokenService
+            JwtTokenService jwtTokenService,
+            PasswordHistoryService passwordHistoryService,
+            org.springframework.data.redis.core.StringRedisTemplate redisTemplate,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenService = jwtTokenService;
+        this.passwordHistoryService = passwordHistoryService;
+        this.redisTemplate = redisTemplate;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -66,11 +80,16 @@ public class AuthService {
         user.setPhone(command.phone());
         user.setEmail(command.email() != null ? command.email().toLowerCase(Locale.ROOT) : null);
         user.setFullName(command.fullName());
-        user.setPasswordHash(passwordEncoder.encode(command.password()));
+        String encodedPassword = passwordEncoder.encode(command.password());
+        user.setPasswordHash(encodedPassword);
         user.setRole(UserRole.MANAGER);
         user.setStatus(UserStatus.ACTIVE);
         user.setMustChangePassword(false);
+        user.setSessionVersion(0);
         user = userRepository.save(user);
+
+        // Save password history
+        passwordHistoryService.save(user.getId(), encodedPassword);
 
         // Create tenant workspace
         Tenant tenant = new Tenant();
@@ -82,6 +101,9 @@ public class AuthService {
         // Link user to tenant
         user.setTenantId(tenant.getId());
         user = userRepository.save(user);
+
+        eventPublisher.publishEvent(new ManagerRegisteredEvent(
+                tenant.getId(), user.getId(), "MANAGER", user.getFullName()));
 
         return buildAuthResult(user, tenant);
     }
@@ -124,7 +146,90 @@ public class AuthService {
             tenant = tenantRepository.findById(user.getTenantId()).orElse(null);
         }
 
+        eventPublisher.publishEvent(new UserLoggedInEvent(
+                user.getTenantId(), user.getId(), user.getRole().name()));
+
         return buildAuthResult(user, tenant);
+    }
+
+    @Transactional
+    public void changePassword(java.util.UUID userId, com.roomrental.modules.auth.application.dto.ChangePasswordCommand command) {
+        if (!command.newPassword().equals(command.confirmPassword())) {
+            throw new BaseException(HttpStatus.BAD_REQUEST, "PASSWORD_MISMATCH", "Passwords do not match");
+        }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BaseException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found"));
+
+        if (!passwordEncoder.matches(command.oldPassword(), user.getPasswordHash())) {
+            throw new BaseException(HttpStatus.BAD_REQUEST, "INVALID_PASSWORD", "Invalid old password");
+        }
+
+        if (passwordHistoryService.isPasswordReused(userId, command.newPassword())) {
+            throw new BaseException(HttpStatus.BAD_REQUEST, "PASSWORD_REUSED", "Password has been used recently");
+        }
+
+        String encodedPassword = passwordEncoder.encode(command.newPassword());
+        user.setPasswordHash(encodedPassword);
+        user.setMustChangePassword(false);
+        user.setSessionVersion(user.getSessionVersion() == null ? 1 : user.getSessionVersion() + 1);
+        userRepository.save(user);
+
+        passwordHistoryService.save(user.getId(), encodedPassword);
+
+        eventPublisher.publishEvent(new PasswordChangedEvent(
+                user.getTenantId(), user.getId(), user.getRole().name()));
+    }
+
+    @Transactional
+    public void forgotPassword(com.roomrental.modules.auth.application.dto.ForgotPasswordCommand command) {
+        String identity = command.identity().trim().toLowerCase(Locale.ROOT);
+        User user = userRepository.findByPhoneOrEmail(identity, identity)
+                .orElseThrow(() -> new BaseException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found"));
+
+        // Generate 6-digit OTP
+        String otp = String.format("%06d", new java.util.Random().nextInt(999999));
+        
+        // Save to Redis with 5-minute expiry
+        String redisKey = "pwd_reset_otp:" + identity;
+        redisTemplate.opsForValue().set(redisKey, otp, java.time.Duration.ofMinutes(5));
+
+        // TODO: Send OTP via Email/SMS
+        System.out.println("OTP for " + identity + ": " + otp);
+    }
+
+    @Transactional
+    public void resetPassword(com.roomrental.modules.auth.application.dto.ResetPasswordCommand command) {
+        if (!command.newPassword().equals(command.confirmPassword())) {
+            throw new BaseException(HttpStatus.BAD_REQUEST, "PASSWORD_MISMATCH", "Passwords do not match");
+        }
+
+        String identity = command.identity().trim().toLowerCase(Locale.ROOT);
+        String redisKey = "pwd_reset_otp:" + identity;
+        String savedOtp = redisTemplate.opsForValue().get(redisKey);
+
+        if (savedOtp == null || !savedOtp.equals(command.otp())) {
+            throw new BaseException(HttpStatus.BAD_REQUEST, "INVALID_OTP", "Invalid or expired OTP");
+        }
+
+        User user = userRepository.findByPhoneOrEmail(identity, identity)
+                .orElseThrow(() -> new BaseException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "User not found"));
+
+        if (passwordHistoryService.isPasswordReused(user.getId(), command.newPassword())) {
+            throw new BaseException(HttpStatus.BAD_REQUEST, "PASSWORD_REUSED", "Password has been used recently");
+        }
+
+        String encodedPassword = passwordEncoder.encode(command.newPassword());
+        user.setPasswordHash(encodedPassword);
+        user.setMustChangePassword(true); // BR87: Force change password sau khi reset
+        user.setSessionVersion(user.getSessionVersion() == null ? 1 : user.getSessionVersion() + 1);
+        userRepository.save(user);
+
+        passwordHistoryService.save(user.getId(), encodedPassword);
+        redisTemplate.delete(redisKey);
+
+        eventPublisher.publishEvent(new PasswordResetEvent(
+                user.getTenantId(), user.getId(), user.getRole().name()));
     }
 
     private AuthResult buildAuthResult(User user, Tenant tenant) {
@@ -133,6 +238,7 @@ public class AuthService {
             claims.put("tenantId", tenant.getId().toString());
         }
         claims.put("role", user.getRole().name());
+        claims.put("session_version", user.getSessionVersion() == null ? 0 : user.getSessionVersion());
 
         String token = jwtTokenService.generateToken(user.getId(), claims);
 

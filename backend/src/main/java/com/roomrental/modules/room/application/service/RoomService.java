@@ -8,9 +8,14 @@ import com.roomrental.modules.motel.domain.repository.MotelRepository;
 import com.roomrental.modules.room.application.dto.RoomCreateCommand;
 import com.roomrental.modules.room.application.dto.RoomResult;
 import com.roomrental.modules.room.application.dto.RoomUpdateCommand;
+import com.roomrental.modules.room.application.event.RoomCreatedEvent;
+import com.roomrental.modules.room.application.event.RoomDeletedEvent;
+import com.roomrental.modules.room.application.event.RoomStatusUpdatedEvent;
+import com.roomrental.modules.room.application.event.RoomUpdatedEvent;
 import com.roomrental.modules.room.domain.model.Room;
 import com.roomrental.modules.room.domain.model.RoomStatus;
 import com.roomrental.modules.room.domain.repository.RoomRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -26,10 +31,12 @@ public class RoomService {
 
     private final RoomRepository roomRepository;
     private final MotelRepository motelRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public RoomService(RoomRepository roomRepository, MotelRepository motelRepository) {
+    public RoomService(RoomRepository roomRepository, MotelRepository motelRepository, ApplicationEventPublisher eventPublisher) {
         this.roomRepository = roomRepository;
         this.motelRepository = motelRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -56,7 +63,12 @@ public class RoomService {
         room.setCurrentResidentsCount(0);
         room.setDescription(command.description());
 
-        return toResult(roomRepository.save(room));
+        RoomResult result = toResult(roomRepository.save(room));
+        UUID tenantId = SecurityUtils.requireTenantId();
+        eventPublisher.publishEvent(new RoomCreatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), result.roomNumber()));
+        return result;
     }
 
     /**
@@ -82,6 +94,7 @@ public class RoomService {
     @Transactional
     public RoomResult update(Long motelId, Long roomId, RoomUpdateCommand command) {
         Room room = findRoom(motelId, roomId);
+        String oldNumber = room.getRoomNumber();
 
         if (command.roomNumber() != null && !command.roomNumber().isBlank()) {
             if (!command.roomNumber().equals(room.getRoomNumber())
@@ -103,7 +116,12 @@ public class RoomService {
             room.setDescription(command.description());
         }
 
-        return toResult(roomRepository.save(room));
+        RoomResult result = toResult(roomRepository.save(room));
+        UUID tenantId = SecurityUtils.requireTenantId();
+        eventPublisher.publishEvent(new RoomUpdatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldNumber, result.roomNumber()));
+        return result;
     }
 
     /**
@@ -112,9 +130,16 @@ public class RoomService {
     @Transactional
     public RoomResult updateStatus(Long motelId, Long roomId, String newStatus) {
         Room room = findRoom(motelId, roomId);
+        String oldStatus = room.getStatus().name();
         RoomStatus target = parseStatus(newStatus);
         room.setStatus(target);
-        return toResult(roomRepository.save(room));
+
+        RoomResult result = toResult(roomRepository.save(room));
+        UUID tenantId = SecurityUtils.requireTenantId();
+        eventPublisher.publishEvent(new RoomStatusUpdatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldStatus, result.status()));
+        return result;
     }
 
     /**
@@ -130,6 +155,11 @@ public class RoomService {
         }
         room.setDeleted(true);
         roomRepository.save(room);
+
+        UUID tenantId = SecurityUtils.requireTenantId();
+        eventPublisher.publishEvent(new RoomDeletedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                roomId, room.getRoomNumber()));
     }
 
     // ── Private helpers ──────────────────────────────────────────────

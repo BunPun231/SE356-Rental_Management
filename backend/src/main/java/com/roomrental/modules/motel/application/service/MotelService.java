@@ -5,8 +5,12 @@ import com.roomrental.common.exception.BaseException;
 import com.roomrental.common.util.SecurityUtils;
 import com.roomrental.modules.motel.application.dto.MotelResult;
 import com.roomrental.modules.motel.application.dto.MotelUpsertCommand;
+import com.roomrental.modules.motel.application.event.MotelCreatedEvent;
+import com.roomrental.modules.motel.application.event.MotelDeletedEvent;
+import com.roomrental.modules.motel.application.event.MotelUpdatedEvent;
 import com.roomrental.modules.motel.domain.model.Motel;
 import com.roomrental.modules.motel.domain.repository.MotelRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -22,9 +26,11 @@ import java.util.UUID;
 public class MotelService {
 
     private final MotelRepository motelRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public MotelService(MotelRepository motelRepository) {
+    public MotelService(MotelRepository motelRepository, ApplicationEventPublisher eventPublisher) {
         this.motelRepository = motelRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -41,7 +47,11 @@ public class MotelService {
         motel.setTotalFloors(command.totalFloors());
         motel.setDescription(command.description());
 
-        return toResult(motelRepository.save(motel));
+        MotelResult result = toResult(motelRepository.save(motel));
+        eventPublisher.publishEvent(new MotelCreatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), result.name()));
+        return result;
     }
 
     /**
@@ -68,6 +78,7 @@ public class MotelService {
     @Transactional
     public MotelResult update(Long id, MotelUpsertCommand command) {
         Motel motel = findMotel(id);
+        String oldName = motel.getName();
 
         if (command.name() != null && !command.name().isBlank()) {
             motel.setName(command.name());
@@ -85,7 +96,12 @@ public class MotelService {
             motel.setDescription(command.description());
         }
 
-        return toResult(motelRepository.save(motel));
+        MotelResult result = toResult(motelRepository.save(motel));
+        UUID tenantId = SecurityUtils.requireTenantId();
+        eventPublisher.publishEvent(new MotelUpdatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldName, result.name()));
+        return result;
     }
 
     /**
@@ -96,6 +112,11 @@ public class MotelService {
         Motel motel = findMotel(id);
         motel.setDeleted(true);
         motelRepository.save(motel);
+
+        UUID tenantId = SecurityUtils.requireTenantId();
+        eventPublisher.publishEvent(new MotelDeletedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                id, motel.getName()));
     }
 
     private Motel findMotel(Long id) {

@@ -7,8 +7,12 @@ import com.roomrental.modules.auth.infrastructure.entity.UserEntity;
 import com.roomrental.modules.auth.infrastructure.repository.UserJpaRepository;
 import com.roomrental.modules.technician.application.dto.TechnicianCreateCommand;
 import com.roomrental.modules.technician.application.dto.TechnicianResult;
+import com.roomrental.modules.technician.application.event.TechnicianCreatedEvent;
+import com.roomrental.modules.technician.application.event.TechnicianLockedEvent;
+import com.roomrental.modules.technician.application.event.TechnicianPasswordResetEvent;
 import com.roomrental.modules.technician.infrastructure.entity.TechnicianProfileEntity;
 import com.roomrental.modules.technician.infrastructure.repository.TechnicianProfileJpaRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -28,15 +32,18 @@ public class TechnicianService {
     private final UserJpaRepository userJpaRepository;
     private final TechnicianProfileJpaRepository profileRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TechnicianService(
             UserJpaRepository userJpaRepository,
             TechnicianProfileJpaRepository profileRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.userJpaRepository = userJpaRepository;
         this.profileRepository = profileRepository;
         this.passwordEncoder = passwordEncoder;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -69,7 +76,11 @@ public class TechnicianService {
         profile.setAvailable(true);
         profileRepository.save(profile);
 
-        return toResult(user, profile);
+        TechnicianResult result = toResult(user, profile);
+        eventPublisher.publishEvent(new TechnicianCreatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.userId(), result.fullName()));
+        return result;
     }
 
     @Transactional(readOnly = true)
@@ -103,9 +114,14 @@ public class TechnicianService {
         UserEntity user = userJpaRepository.findById(techId)
                 .filter(u -> tenantId.equals(u.getTenantId()) && "TECHNICIAN".equals(u.getRole()))
                 .orElseThrow(() -> BaseException.notFound("Technician", techId));
+        String oldStatus = user.getStatus();
         user.setStatus("LOCKED");
         user.setLockReason(reason);
         userJpaRepository.save(user);
+
+        eventPublisher.publishEvent(new TechnicianLockedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                techId, oldStatus, reason));
     }
 
     /**
@@ -120,6 +136,10 @@ public class TechnicianService {
         user.setPasswordHash(passwordEncoder.encode(user.getPhone()));
         user.setMustChangePassword(true);
         userJpaRepository.save(user);
+
+        eventPublisher.publishEvent(new TechnicianPasswordResetEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                techId));
     }
 
     private TechnicianResult toResult(UserEntity user, TechnicianProfileEntity p) {

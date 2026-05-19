@@ -2,6 +2,13 @@ package com.roomrental.modules.contract.application.service;
 
 import com.roomrental.common.exception.BaseException;
 import com.roomrental.common.util.SecurityUtils;
+import com.roomrental.modules.contract.application.event.ContractActivatedEvent;
+import com.roomrental.modules.contract.application.event.ContractAdjustedEvent;
+import com.roomrental.modules.contract.application.event.ContractCancelledEvent;
+import com.roomrental.modules.contract.application.event.ContractCreatedEvent;
+import com.roomrental.modules.contract.application.event.DepositCollectedEvent;
+import com.roomrental.modules.contract.application.event.DepositDeductedEvent;
+import com.roomrental.modules.contract.application.event.DepositRefundedEvent;
 import com.roomrental.modules.contract.application.adjustment.ContractAdjustmentStrategy;
 import com.roomrental.modules.contract.application.adjustment.ContractAdjustmentStrategyFactory;
 import com.roomrental.modules.contract.application.dto.ContractAdjustmentRequest;
@@ -81,6 +88,7 @@ public class ContractService {
         this.rentalServiceRepository = rentalServiceRepository;
         this.strategyFactory = strategyFactory;
         this.eventPublisher = eventPublisher;
+
     }
 
     @Transactional
@@ -157,7 +165,11 @@ public class ContractService {
         room.setCurrentResidentsCount(residents.isEmpty() ? 1 : residents.size());
         roomRepository.save(room);
 
-        return toResult(saved);
+        ContractResult result = toResult(saved);
+        eventPublisher.publishEvent(new ContractCreatedEvent(
+                tenantId, currentUserId, SecurityUtils.getCurrentRole(),
+                result.id(), result.status()));
+        return result;
     }
 
     @Transactional
@@ -184,7 +196,11 @@ public class ContractService {
         room.setCurrentResidentsCount(residentsCount > 0 ? residentsCount : 1);
         roomRepository.save(room);
 
-        return toResult(saved);
+        ContractResult result = toResult(saved);
+        eventPublisher.publishEvent(new ContractActivatedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id()));
+        return result;
     }
 
 
@@ -347,6 +363,10 @@ public class ContractService {
                 LocalDateTime.now()
         ));
 
+        eventPublisher.publishEvent(new ContractAdjustedEvent(
+                tenantId, actorId, SecurityUtils.getCurrentRole(),
+                contractId, type.name()));
+
         // Build result from the created appendix, or return minimal result
         if (appendixId != null) {
             ContractAppendix appendix = contractAppendixRepository.findByContractId(contractId).stream()
@@ -381,6 +401,7 @@ public class ContractService {
             throw BaseException.badRequest("Cannot cancel a liquidated contract");
         }
 
+        String oldStatus = contract.getStatus().name();
         contract.setStatus(Contract.ContractStatus.CANCELED);
         contract.setCancelReason(reason);
         contract.setUpdatedAt(LocalDateTime.now());
@@ -394,7 +415,11 @@ public class ContractService {
         room.setCurrentResidentsCount(0);
         roomRepository.save(room);
 
-        return toResult(saved);
+        ContractResult result = toResult(saved);
+        eventPublisher.publishEvent(new ContractCancelledEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldStatus, reason));
+        return result;
     }
 
     // ========================
@@ -411,6 +436,7 @@ public class ContractService {
             throw BaseException.badRequest("Deposit must be UNPAID to collect");
         }
 
+        String oldDepositStatus = contract.getDepositStatus().name();
         contract.setDepositStatus(Contract.DepositStatus.PAID);
         contract.setUpdatedAt(LocalDateTime.now());
 
@@ -431,7 +457,11 @@ public class ContractService {
             roomRepository.save(room);
         }
 
-        return toResult(saved);
+        ContractResult result = toResult(saved);
+        eventPublisher.publishEvent(new DepositCollectedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldDepositStatus));
+        return result;
     }
 
     @Transactional
@@ -444,10 +474,16 @@ public class ContractService {
             throw BaseException.badRequest("Deposit must be PAID to refund");
         }
 
+        String oldDepositStatus = contract.getDepositStatus().name();
         contract.setDepositStatus(Contract.DepositStatus.REFUNDED);
         contract.setUpdatedAt(LocalDateTime.now());
         Contract saved = contractRepository.save(contract);
-        return toResult(saved);
+
+        ContractResult result = toResult(saved);
+        eventPublisher.publishEvent(new DepositRefundedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldDepositStatus));
+        return result;
     }
 
     @Transactional
@@ -460,10 +496,16 @@ public class ContractService {
             throw BaseException.badRequest("Deposit must be PAID to deduct");
         }
 
+        String oldDepositStatus = contract.getDepositStatus().name();
         contract.setDepositStatus(Contract.DepositStatus.DEDUCTED);
         contract.setUpdatedAt(LocalDateTime.now());
         Contract saved = contractRepository.save(contract);
-        return toResult(saved);
+
+        ContractResult result = toResult(saved);
+        eventPublisher.publishEvent(new DepositDeductedEvent(
+                tenantId, SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentRole(),
+                result.id(), oldDepositStatus));
+        return result;
     }
 
     // Helper methods
