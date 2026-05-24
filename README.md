@@ -37,6 +37,7 @@ Each module is self-contained with its own domain, application, infrastructure, 
 
 ## 🛠 Tech Stack
 
+### Backend
 | Layer | Technology |
 |-------|-----------|
 | **Runtime** | Java 21, Spring Boot 3.3 |
@@ -49,45 +50,74 @@ Each module is self-contained with its own domain, application, infrastructure, 
 | **Testing** | JUnit 5, Mockito, H2 (in-memory), Testcontainers |
 | **Build** | Maven with Wrapper |
 
+### Frontend
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | React 18, Vite |
+| **Styling** | Tailwind CSS (v3), clsx, tailwind-merge |
+| **State Management** | Zustand |
+| **Routing** | React Router DOM (v6) |
+| **Icons & Charts** | Lucide React, Recharts |
+| **Data Fetching** | Axios, React Query (TanStack) |
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - **Java 21** (Temurin recommended)
+- **Node.js 18+** (for frontend)
 - **Docker & Docker Compose** (for local infrastructure)
 
-### 1. Start Local Infrastructure
+Dự án cung cấp 2 chế độ chạy môi trường Local tùy thuộc vào thói quen của bạn:
 
+### Option A: Fully Dockerized (Khuyến nghị)
+Bạn không cần cài đặt Java hay Node.js. Chỉ cần Docker:
+
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
+Lệnh này sẽ khởi động toàn bộ: **Postgres (port 15432), Redis (port 16379), Backend (port 8080), Frontend (port 5173)**.
+- Khi bạn sửa code trong `frontend/` hoặc `backend/`, container sẽ tự động **Hot Reload**.
+- Bấm `Ctrl+C` hoặc `docker compose -f docker-compose.local.yml down` để dừng.
+
+### Option B: Hybrid (Infra on Docker, Apps Native)
+Nếu bạn muốn dùng Terminal trên IDE (IntelliJ, VSCode) để chạy App:
+
+**1. Khởi động Database & Redis:**
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
+*(Postgres chạy trên `localhost:15432`, Redis chạy trên `localhost:16379`)*
 
-This starts:
-- **PostgreSQL 16** on `localhost:5432`
-- **Redis 7** on `localhost:6379`
-
-### 2. Run the Backend
-
+**2. Chạy Backend (Cần cài đặt Java 21):**
 ```bash
 cd backend
 chmod +x mvnw
 ./mvnw spring-boot:run
 ```
+*(App backend sẽ chạy ở **http://localhost:8080**)*
 
-The application starts on **http://localhost:8080** with dev profile (auto-detected).
+**3. Chạy Frontend (Cần cài đặt Node 18+):**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+*(App frontend sẽ chạy ở **http://localhost:5173**)*
 
-### 3. Access Swagger UI
+### Access APIs
+- **Frontend App**: http://localhost:5173
+- **Swagger UI**: http://localhost:8080/swagger-ui.html
+- **OpenAPI JSON**: http://localhost:8080/v3/api-docs
 
-Open **http://localhost:8080/swagger-ui.html** for interactive API documentation.
+### 4. Default Demo Account
 
-### 4. Default Admin Account
-
-On first startup, an admin account is seeded automatically:
+On first startup or after running the seed script, a demo account is available:
 
 | Field | Value |
 |-------|-------|
-| Phone | `0900000000` |
-| Password | `Admin@1234` |
+| Phone | `0911222333` |
+| Password | `Demo@123456` |
 
 Login via `POST /api/public/auth/login` to get a JWT token.
 
@@ -176,13 +206,18 @@ backend/src/main/java/com/roomrental/
 
 | Module | API Prefix | Use Cases | Description |
 |--------|-----------|-----------|-------------|
-| **Auth** | `/api/public/auth` | UC01-02 | Registration, login (phone/email) |
+| **Auth** | `/api/public/auth` | UC01-06 | Registration, login, password recovery |
 | **Motel** | `/api/motels` | UC20-25 | CRUD boarding houses |
 | **Room** | `/api/motels/{id}/rooms` | UC26-31 | CRUD rooms, status management |
-| **Service** | `/api/motels/{id}/services` | UC32-36 | Manage rental services (Electric, Water, Internet) |
+| **Service** | `/api/motels/{id}/services` | UC32-37 | Manage rental services (Electric, Water, Internet) |
 | **Device** | `/api/motels/{id}/devices` | UC40-45 | Equipment inventory tracking |
 | **Resident** | `/api/residents` | UC49-54 | Resident account management |
 | **Technician** | `/api/technicians` | UC56-62 | Technician management, lock/reset |
+| **Contract** | `/api/contracts` | UC63-69 | Contract creation, appendices, deposits, cancellation |
+| **MeterReading**| `/api/v1/meter-readings` | UC70-72 | Monthly electricity/water meter reading logging |
+| **Invoice** | `/api/v1/invoices` | UC73-77 | Invoice generation, void, adjustment, and listing |
+| **Report** | `/api/v1/reports` | UC90-94 | Revenue, occupancy, debt reporting, and dashboard |
+| **Audit** | `/api/v1/audit-logs` | UC13 | System-wide audit trail logging |
 
 ## 🧪 Testing
 
