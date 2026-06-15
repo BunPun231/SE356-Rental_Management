@@ -61,6 +61,7 @@ public class MeterReadingService {
     public MeterReadingResult submit(MeterReadingSubmitCommand command) {
         UUID tenantId = SecurityUtils.requireTenantId();
         UUID actorId = SecurityUtils.getCurrentUserId();
+        LocalDate billingMonth = normalizeBillingMonth(command.billingMonth());
 
         Room room = roomRepository.findById(command.roomId())
                 .orElseThrow(() -> BaseException.notFound("Room", command.roomId()));
@@ -72,18 +73,13 @@ public class MeterReadingService {
         Long serviceUsageId = resolveActiveServiceUsageId(command.roomId(), command.serviceId());
 
         boolean hasApproved = meterReadingRepository.existsByServiceUsageIdAndBillingMonthAndStatus(
-            serviceUsageId, command.billingMonth(), MeterReadingStatus.APPROVED.name()
+            serviceUsageId, billingMonth, MeterReadingStatus.APPROVED.name()
         );
         if (hasApproved) {
             throw BaseException.badRequest("Already has approved reading for this month");
         }
 
-        // Get old reading (in real logic, query the previous approved reading from DB)
-        // For simplicity, we assume command provides oldReading or we calculate it. 
-        // Here we just fetch the last approved one to set oldReading.
-        List<MeterReading> prevReadings = meterReadingRepository.findApprovedByRoomIdAndBillingMonth(
-                command.roomId(), command.billingMonth().minusMonths(1));
-        BigDecimal oldReading = prevReadings.isEmpty() ? BigDecimal.ZERO : prevReadings.get(0).getNewReading();
+        BigDecimal oldReading = resolveOldReading(serviceUsageId);
 
         if (command.newReading().compareTo(oldReading) < 0) {
             throw BaseException.badRequest("New reading cannot be less than old reading");
@@ -93,7 +89,7 @@ public class MeterReadingService {
         reading.setTenantId(tenantId);
         reading.setRoomId(command.roomId());
         reading.setServiceUsageId(serviceUsageId);
-        reading.setBillingMonth(command.billingMonth());
+        reading.setBillingMonth(billingMonth);
         reading.setOldReading(oldReading);
         reading.setNewReading(command.newReading());
         reading.calculateConsumption();
@@ -122,6 +118,7 @@ public class MeterReadingService {
         }
 
         Long serviceUsageId = resolveActiveServiceUsageId(command.roomId(), command.serviceId());
+        LocalDate billingMonth = normalizeBillingMonth(command.billingMonth());
 
         // UC71 - Just return suggested result, do not save and do not upload to Cloudinary at this step
         OcrResult ocrResult = ocrPort.extractReading(command.imageBytes(), command.mimeType());
@@ -132,10 +129,7 @@ public class MeterReadingService {
 
         String imageUrl = null;
 
-        // Fetch old reading from DB
-        List<MeterReading> prevReadings = meterReadingRepository.findApprovedByRoomIdAndBillingMonth(
-                command.roomId(), command.billingMonth().minusMonths(1));
-        BigDecimal oldReading = prevReadings.isEmpty() ? BigDecimal.ZERO : prevReadings.get(0).getNewReading();
+        BigDecimal oldReading = resolveOldReading(serviceUsageId);
         BigDecimal consumption = ocrResult.extractedValue().subtract(oldReading).max(BigDecimal.ZERO);
 
         RentalService svc = rentalServiceRepository.findById(command.serviceId()).orElse(null);
@@ -146,7 +140,7 @@ public class MeterReadingService {
             command.roomId(),
             command.serviceId(),
             serviceName,
-            command.billingMonth(),
+            billingMonth,
             oldReading,
             ocrResult.extractedValue(),
             consumption,
@@ -274,10 +268,24 @@ public class MeterReadingService {
         );
     }
 
+    private LocalDate normalizeBillingMonth(LocalDate billingMonth) {
+        if (billingMonth == null) {
+            throw BaseException.badRequest("billingMonth: required");
+        }
+        return billingMonth.withDayOfMonth(1);
+    }
+
     private Long resolveActiveServiceUsageId(Long roomId, Long serviceId) {
         return serviceUsageRepository.findActiveByRoomIdAndServiceId(roomId, serviceId)
                 .orElseThrow(() -> BaseException.badRequest("Phòng chưa đăng ký sử dụng dịch vụ này"))
                 .getId();
+    }
+
+    private BigDecimal resolveOldReading(Long serviceUsageId) {
+        return meterReadingRepository.findLatestApprovedByServiceUsageId(serviceUsageId)
+                .map(MeterReading::getNewReading)
+                .or(() -> serviceUsageRepository.findById(serviceUsageId).map(ServiceUsage::getStartIndex))
+                .orElse(BigDecimal.ZERO);
     }
 }
 
