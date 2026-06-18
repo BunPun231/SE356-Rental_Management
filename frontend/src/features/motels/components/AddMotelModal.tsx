@@ -16,6 +16,8 @@ export function AddMotelModal({ isOpen, onClose, onSuccess, motel }: AddMotelMod
   const [address, setAddress] = useState(motel?.address ?? "");
   const [totalFloors, setTotalFloors] = useState(motel?.totalFloors?.toString() ?? "1");
   const [description, setDescription] = useState(motel?.description ?? "");
+  const [closingDay, setClosingDay] = useState("5");
+  const [depositRate, setDepositRate] = useState("100");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,11 +27,15 @@ export function AddMotelModal({ isOpen, onClose, onSuccess, motel }: AddMotelMod
       setAddress(motel.address);
       setTotalFloors(motel.totalFloors.toString());
       setDescription(motel.description ?? "");
+      setClosingDay(motel.billingCycleDay !== undefined && motel.billingCycleDay !== null ? motel.billingCycleDay.toString() : "last");
+      setDepositRate(motel.depositPercent !== undefined && motel.depositPercent !== null ? motel.depositPercent.toString() : "100");
     } else {
       setName("");
       setAddress("");
       setTotalFloors("1");
       setDescription("");
+      setClosingDay("5");
+      setDepositRate("100");
     }
     setError("");
   }, [motel, isOpen]);
@@ -39,21 +45,28 @@ export function AddMotelModal({ isOpen, onClose, onSuccess, motel }: AddMotelMod
     setError("");
     setIsLoading(true);
     try {
+      const payload = {
+        name: name.trim(),
+        address: address.trim(),
+        totalFloors: parseInt(totalFloors, 10),
+        description: description.trim() || undefined,
+        billingCycleDay: closingDay === "last" ? undefined : parseInt(closingDay, 10),
+        depositPercent: parseFloat(depositRate) || 0,
+      };
+
+      let savedMotel;
       if (motel) {
-        await motelService.update(motel.id, {
-          name: name.trim(),
-          address: address.trim(),
-          totalFloors: parseInt(totalFloors, 10),
-          description: description.trim() || undefined,
-        });
+        savedMotel = await motelService.update(motel.id, payload);
       } else {
-        await motelService.create({
-          name: name.trim(),
-          address: address.trim(),
-          totalFloors: parseInt(totalFloors, 10),
-          description: description.trim() || undefined,
-        });
+        savedMotel = await motelService.create(payload);
       }
+      
+      localStorage.setItem(`motel_settings_${savedMotel.id}`, JSON.stringify({
+        paymentCycle: 1,
+        closingDay: closingDay === "last" ? 30 : parseInt(closingDay, 10),
+        depositRate: parseFloat(depositRate),
+      }));
+
       onSuccess?.();
     } catch (err) {
       setError(extractError(err));
@@ -111,6 +124,34 @@ export function AddMotelModal({ isOpen, onClose, onSuccess, motel }: AddMotelMod
             required
             className={inputClass}
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-slate-700">Ngày chốt kỳ *</label>
+            <select
+              value={closingDay}
+              onChange={(e) => setClosingDay(e.target.value)}
+              className={inputClass}
+              required
+            >
+              {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d.toString()}>Ngày {d} hàng tháng</option>
+              ))}
+              <option value="last">Ngày cuối tháng</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-slate-700">Tỷ lệ tiền cọc (%) *</label>
+            <input
+              type="number"
+              value={depositRate}
+              onChange={(e) => setDepositRate(e.target.value)}
+              min={0}
+              required
+              className={inputClass}
+            />
+          </div>
         </div>
 
         <div className="space-y-1">

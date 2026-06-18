@@ -9,6 +9,7 @@ import { motelService, type MotelResult } from "@/services/motelService";
 import { extractError } from "@/lib/api";
 import { Modal } from "@/components/ui/Modal";
 import { PaymentModal } from "../components/PaymentModal";
+import { InvoiceDetailModal } from "../components/InvoiceDetailModal";
 import { useAuthStore } from "@/store/authStore";
 
 const STATUS_BADGE: Record<string, React.ReactNode> = {
@@ -223,9 +224,8 @@ export function InvoiceListPage() {
         ].map((item) => (
           <div
             key={item.label}
-            className={`rounded-2xl bg-white p-5 shadow-sm border border-slate-100 ${
-              item.border ? "border-l-4 border-l-rose-400" : ""
-            }`}
+            className={`rounded-2xl bg-white p-5 shadow-sm border border-slate-100 ${item.border ? "border-l-4 border-l-rose-400" : ""
+              }`}
           >
             <p className="text-sm font-medium text-slate-500">{item.label}</p>
             <h3 className={`text-2xl font-bold mt-1 font-display ${item.color}`}>
@@ -294,7 +294,9 @@ export function InvoiceListPage() {
                 <TableRow key={invoice.id} className="hover:bg-slate-50/50 transition-colors">
                   <TableCell>
                     <div className="font-mono text-xs text-slate-400">#{invoice.id}</div>
-                    <div className="font-medium text-brand-deep">Phòng {invoice.roomId}</div>
+                    <div className="font-medium text-brand-deep">
+                      {invoice.roomNumber ? `P.${invoice.roomNumber}` : `Phòng ${invoice.roomId}`}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="text-sm text-slate-700">
@@ -315,28 +317,28 @@ export function InvoiceListPage() {
                     <div className="text-sm text-emerald-700 font-medium">{formatCurrency(invoice.paidAmount)}</div>
                   </TableCell>
                   <TableCell>{STATUS_BADGE[invoice.status] ?? <Badge>{invoice.status}</Badge>}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {(invoice.status === "PENDING" || invoice.status === "PARTIAL") && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200"
-                            onClick={() => setPaymentInvoice(invoice)}
-                          >
-                            <CreditCard size={14} className="mr-1.5" />
-                            {isTenant ? "Thanh toán" : "Thu tiền"}
-                          </Button>
-                        )}
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      {(invoice.status === "PENDING" || invoice.status === "PARTIAL") && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setSelectedInvoice(invoice)}
+                          className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200"
+                          onClick={() => setPaymentInvoice(invoice)}
                         >
-                          Chi tiết
+                          <CreditCard size={14} className="mr-1.5" />
+                          {isTenant ? "Thanh toán" : "Thu tiền"}
                         </Button>
-                      </div>
-                    </TableCell>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedInvoice(invoice)}
+                      >
+                        Chi tiết
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -357,53 +359,16 @@ export function InvoiceListPage() {
       </div>
 
       {selectedInvoice && (
-        <Modal isOpen={!!selectedInvoice} onClose={() => setSelectedInvoice(null)} title={`Chi tiết hóa đơn #${selectedInvoice.id}`} size="lg">
-          <div className="space-y-3">
-            {[
-              { label: "Phòng", value: `Phòng ${selectedInvoice.roomId}` },
-              { label: "Kỳ hóa đơn", value: selectedInvoice.billingMonth ? new Date(selectedInvoice.billingMonth).toLocaleDateString("vi-VN", { month: "long", year: "numeric" }) : "-" },
-              { label: "Tổng tiền", value: formatCurrency(selectedInvoice.totalAmount) },
-              { label: "Đã thanh toán", value: formatCurrency(selectedInvoice.paidAmount) },
-              { label: "Còn lại", value: formatCurrency(selectedInvoice.totalAmount - selectedInvoice.paidAmount) },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex justify-between py-2 border-b border-slate-100">
-                <span className="text-slate-500 text-sm">{label}</span>
-                <span className="font-medium text-sm">{value}</span>
-              </div>
-            ))}
-            <div className="flex justify-between py-2">
-              <span className="text-slate-500 text-sm">Trạng thái</span>
-              <span>{STATUS_BADGE[selectedInvoice.status]}</span>
-            </div>
-
-            {invoiceDetails?.details && invoiceDetails.details.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-slate-200">
-                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Chi tiết các khoản phí</h4>
-                <div className="divide-y divide-slate-100 bg-slate-50 rounded-xl border border-slate-200 p-3 space-y-2">
-                  {invoiceDetails.details.map((detail, idx) => (
-                    <div key={idx} className="flex justify-between text-sm py-1.5">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-slate-800">{detail.serviceName}</span>
-                        {detail.chargeType !== "FIXED" && detail.oldReading !== undefined && detail.newReading !== undefined && (
-                          <span className="text-xs text-slate-400">
-                            Chỉ số: {detail.oldReading} → {detail.newReading} ({detail.consumption} {detail.serviceName.toLowerCase().includes("nước") ? "khối" : "số"})
-                          </span>
-                        )}
-                        {detail.chargeType !== "FIXED" && (
-                          <span className="text-xs text-slate-400">Đơn giá: {formatCurrency(detail.unitPrice)}</span>
-                        )}
-                      </div>
-                      <span className="font-bold text-slate-800">{formatCurrency(detail.totalCost)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="pt-4 border-t border-slate-100 flex justify-end mt-4">
-            <Button variant="outline" onClick={() => setSelectedInvoice(null)}>Đóng</Button>
-          </div>
-        </Modal>
+        <InvoiceDetailModal
+          isOpen={!!selectedInvoice}
+          onClose={() => setSelectedInvoice(null)}
+          invoice={invoiceDetails}
+          isManager={!isTenant}
+          onCollectPayment={() => {
+            setSelectedInvoice(null);
+            setPaymentInvoice(selectedInvoice);
+          }}
+        />
       )}
 
       <GenerateInvoiceModal
@@ -411,7 +376,7 @@ export function InvoiceListPage() {
         onClose={() => setIsGenerateOpen(false)}
         onSuccess={() => { setIsGenerateOpen(false); fetchInvoices(); }}
       />
-      
+
       {paymentInvoice && (
         <PaymentModal
           isOpen={!!paymentInvoice}

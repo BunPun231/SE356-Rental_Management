@@ -8,6 +8,7 @@ export interface InvoiceResult {
   tenantId: string;
   contractId: number;
   roomId: number;
+  roomNumber?: string;
   billingMonth: string;
   totalAmount: number;
   paidAmount: number;
@@ -16,6 +17,7 @@ export interface InvoiceResult {
   invoiceType: string;
   cancelReason?: string;
   dueDate?: string;
+  calculationSnapshot?: string;
   details?: InvoiceDetail[];
 }
 
@@ -180,6 +182,12 @@ export const meterReadingService = {
       null,
       { params: { reason } }
     );
+    return res.data;
+  },
+
+  /** UC70: Bulk approve meter readings */
+  async bulkApprove(ids: number[]): Promise<MeterReadingResult[]> {
+    const res = await api.post<MeterReadingResult[]>("/api/v1/meter-readings/bulk-approve", ids);
     return res.data;
   },
 };

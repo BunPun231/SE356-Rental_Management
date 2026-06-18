@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { roomService } from "@/services/motelService";
+import { roomService, type RoomResult } from "@/services/motelService";
 import { extractError } from "@/lib/api";
+import { formatVnStyle, stripVnStyle } from "@/lib/utils";
 
 interface AddRoomModalProps {
   isOpen: boolean;
@@ -17,8 +18,35 @@ export function AddRoomModal({ isOpen, onClose, onSuccess, motelId }: AddRoomMod
   const [area, setArea] = useState("");
   const [basePrice, setBasePrice] = useState("");
   const [description, setDescription] = useState("");
+  const [existingRooms, setExistingRooms] = useState<RoomResult[]>([]);
+  const [isManuallyEdited, setIsManuallyEdited] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const loadRooms = async () => {
+    try {
+      const res = await roomService.list(motelId);
+      setExistingRooms(res.content || []);
+    } catch (err) {
+      console.error("Failed to load rooms", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && motelId) {
+      loadRooms();
+      setIsManuallyEdited(false);
+    }
+  }, [isOpen, motelId]);
+
+  useEffect(() => {
+    if (!isManuallyEdited && isOpen) {
+      const floorNum = parseInt(floor, 10) || 1;
+      const count = existingRooms.filter((r) => r.floor === floorNum).length;
+      const suggested = `P${floorNum}${String(count + 1).padStart(2, "0")}`;
+      setRoomNumber(suggested);
+    }
+  }, [floor, existingRooms, isManuallyEdited, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +65,7 @@ export function AddRoomModal({ isOpen, onClose, onSuccess, motelId }: AddRoomMod
       setArea("");
       setBasePrice("");
       setDescription("");
+      setIsManuallyEdited(false);
       onSuccess?.();
     } catch (err) {
       setError(extractError(err));
@@ -62,7 +91,10 @@ export function AddRoomModal({ isOpen, onClose, onSuccess, motelId }: AddRoomMod
             <input
               type="text"
               value={roomNumber}
-              onChange={(e) => setRoomNumber(e.target.value)}
+              onChange={(e) => {
+                setRoomNumber(e.target.value);
+                setIsManuallyEdited(true);
+              }}
               placeholder="VD: 101, 102"
               required
               className={inputClass}
@@ -96,11 +128,10 @@ export function AddRoomModal({ isOpen, onClose, onSuccess, motelId }: AddRoomMod
           <div className="space-y-1">
             <label className="text-sm font-medium text-slate-700">Giá thuê (đ/tháng) *</label>
             <input
-              type="number"
-              value={basePrice}
-              onChange={(e) => setBasePrice(e.target.value)}
-              min={0}
-              placeholder="VD: 3000000"
+              type="text"
+              value={formatVnStyle(basePrice)}
+              onChange={(e) => setBasePrice(stripVnStyle(e.target.value))}
+              placeholder="VD: 3.000.000"
               required
               className={inputClass}
             />

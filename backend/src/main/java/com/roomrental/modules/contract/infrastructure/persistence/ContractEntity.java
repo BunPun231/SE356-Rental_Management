@@ -50,6 +50,12 @@ public class ContractEntity {
     @Column(name = "billing_date")
     private LocalDate billingDate;
 
+    @Column(name = "billing_cycle_day")
+    private Integer billingCycleDay;
+
+    @Column(name = "payment_cycle_months")
+    private Integer paymentCycleMonths;
+
     @Column(name = "intended_move_out_date")
     private LocalDate intendedMoveOutDate;
 
@@ -87,20 +93,20 @@ public class ContractEntity {
         this.id = id;
     }
 
-    public UUID getTenantId() {
-        return tenantId;
-    }
-
-    public void setTenantId(UUID tenantId) {
-        this.tenantId = tenantId;
-    }
-
     public Long getVersion() {
         return version;
     }
 
     public void setVersion(Long version) {
         this.version = version;
+    }
+
+    public UUID getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(UUID tenantId) {
+        this.tenantId = tenantId;
     }
 
     public Long getRoomId() {
@@ -173,6 +179,22 @@ public class ContractEntity {
 
     public void setBillingDate(LocalDate billingDate) {
         this.billingDate = billingDate;
+    }
+
+    public Integer getBillingCycleDay() {
+        return billingCycleDay;
+    }
+
+    public void setBillingCycleDay(Integer billingCycleDay) {
+        this.billingCycleDay = billingCycleDay;
+    }
+
+    public Integer getPaymentCycleMonths() {
+        return paymentCycleMonths;
+    }
+
+    public void setPaymentCycleMonths(Integer paymentCycleMonths) {
+        this.paymentCycleMonths = paymentCycleMonths;
     }
 
     public LocalDate getIntendedMoveOutDate() {

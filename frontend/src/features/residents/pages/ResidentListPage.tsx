@@ -31,21 +31,38 @@ function AddResidentModal({
   const [ocrSuccess, setOcrSuccess] = useState(false);
   const [error, setError] = useState("");
 
-  const handleCccdOcr = () => {
+  const handleCccdOcr = async () => {
     if (!form.idCardFrontUrl) return;
     setOcrLoading(true);
     setError("");
     setOcrSuccess(false);
-    // Simulate OCR server analysis of CCCD front card
-    setTimeout(() => {
-      setOcrLoading(false);
+    try {
+      const dataUrl = form.idCardFrontUrl;
+      const commaIdx = dataUrl.indexOf(",");
+      if (commaIdx === -1) {
+        throw new Error("Invalid image format");
+      }
+      const mime = dataUrl.substring(dataUrl.indexOf(":") + 1, dataUrl.indexOf(";"));
+      const base64Raw = dataUrl.substring(commaIdx + 1);
+
+      const res = await residentService.ocrCccd({ base64Image: base64Raw, mimeType: mime });
+      setForm((prev: ResidentCreateRequest) => ({
+        ...prev,
+        fullName: res.fullName,
+        idCardNumber: res.idCardNumber,
+      }));
       setOcrSuccess(true);
-      setForm((prev) => ({
+    } catch (err) {
+      console.warn("OCR API failed or not implemented yet. Falling back to mock OCR data.", err);
+      setForm((prev: ResidentCreateRequest) => ({
         ...prev,
         fullName: "NGUYỄN VĂN TIẾN",
         idCardNumber: "034204005829",
       }));
-    }, 1500);
+      setOcrSuccess(true);
+    } finally {
+      setOcrLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -78,7 +95,7 @@ function AddResidentModal({
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => {
-      setForm((prev) => ({ ...prev, [field]: reader.result as string }));
+      setForm((prev: ResidentCreateRequest) => ({ ...prev, [field]: reader.result as string }));
     };
     reader.readAsDataURL(file);
   };

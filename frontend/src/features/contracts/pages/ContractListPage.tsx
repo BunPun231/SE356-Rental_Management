@@ -12,6 +12,7 @@ import { residentService, type ResidentResult } from "@/services/residentService
 import { extractError } from "@/lib/api";
 import { SettlementModal } from "../components/SettlementModal";
 import { CreateContractModal } from "../components/CreateContractModal";
+import { ContractTemplateModal } from "../components/ContractTemplateModal";
 
 // ============ STATUS HELPERS ============
 const STATUS_BADGE: Record<string, React.ReactNode> = {
@@ -39,11 +40,13 @@ function ContractDetailModal({
   onClose,
   onRefresh,
   residents,
+  rooms,
 }: {
   contract: ContractResult;
   onClose: () => void;
   onRefresh: () => void;
   residents: ResidentResult[];
+  rooms: RoomResult[];
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -160,15 +163,22 @@ function ContractDetailModal({
     return res ? res.fullName : `${userId.slice(0, 8)}...`;
   };
 
+  const getRoomName = (roomId: number) => {
+    const r = rooms.find((room) => room.id === roomId);
+    return r ? `P.${r.roomNumber}` : `ID: ${roomId}`;
+  };
+
   const rows = [
     { label: "Mã hợp đồng", value: contract.contractCode ?? `#${contract.id}` },
-    { label: "Phòng", value: `Phòng ${contract.roomId}` },
+    { label: "Phòng", value: getRoomName(contract.roomId) },
     { label: "Khách đại diện", value: getResidentName(contract.primaryResidentUserId) },
     { label: "Thời hạn", value: `${contract.startDate} → ${contract.endDate}` },
     { label: "Tiền thuê", value: formatCurrency(contract.rentPrice) + "/tháng" },
     { label: "Tiền cọc", value: formatCurrency(contract.depositAmount) },
     { label: "Trạng thái cọc", value: DEPOSIT_BADGE[contract.depositStatus] },
     { label: "Ngày tính phí", value: contract.billingDate ?? "-" },
+    { label: "Ngày chốt kỳ đóng tiền", value: contract.billingCycleDay != null ? (contract.billingCycleDay === 31 ? "Ngày cuối tháng" : `Ngày ${contract.billingCycleDay} hàng tháng`) : "-" },
+    { label: "Kỳ đóng tiền", value: contract.paymentCycleMonths != null ? `${contract.paymentCycleMonths} tháng / lần` : "-" },
   ];
 
   const inputClass = "w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-deep/30 focus:border-brand-deep transition-all bg-white";
@@ -404,6 +414,20 @@ export function ContractListPage() {
   const [motels, setMotels] = useState<MotelResult[]>([]);
   const [selectedMotelId, setSelectedMotelId] = useState<number | null>(null);
   const [residents, setResidents] = useState<ResidentResult[]>([]);
+  const [rooms, setRooms] = useState<RoomResult[]>([]);
+  const [printingContract, setPrintingContract] = useState<ContractResult | null>(null);
+
+  useEffect(() => {
+    if (selectedMotelId) {
+      roomService.list(selectedMotelId)
+        .then((res) => {
+          setRooms(res.content);
+        })
+        .catch((err) => console.error("Error loading rooms", err));
+    } else {
+      setRooms([]);
+    }
+  }, [selectedMotelId]);
 
   useEffect(() => {
     motelService.list().then((r) => {
@@ -424,6 +448,10 @@ export function ContractListPage() {
       );
       setContracts(result.content);
       setTotalPages(result.totalPages);
+      
+      const resResult = await residentService.list(0, 1000);
+      setResidents(resResult.content);
+
       setError(null);
     } catch (err) {
       setError(extractError(err));
@@ -588,7 +616,12 @@ export function ContractListPage() {
                   <TableRow key={contract.id} className="hover:bg-slate-50/50 transition-colors">
                     <TableCell>
                       <div className="font-mono text-xs text-slate-400">#{contract.contractCode}</div>
-                      <div className="font-semibold text-brand-deep">Phòng {contract.roomId}</div>
+                      <div className="font-semibold text-brand-deep">
+                        {(() => {
+                          const r = rooms.find((room) => room.id === contract.roomId);
+                          return r ? `P.${r.roomNumber}` : `Phòng ${contract.roomId}`;
+                        })()}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm text-slate-700 font-medium">
@@ -616,11 +649,26 @@ export function ContractListPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 border-amber-200"
+                        className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 border-amber-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => setSettlementContractId(contract.id)}
+                        disabled={contract.status === "DRAFT" || contract.depositStatus === "UNPAID"}
+                        title={
+                          contract.status === "DRAFT"
+                            ? "Không thể thanh lý hợp đồng nháp"
+                            : contract.depositStatus === "UNPAID"
+                            ? "Không thể tất toán khi chưa hoàn tất thu tiền cọc"
+                            : undefined
+                        }
                       >
                         <Ban size={14} className="mr-1.5" />
                         Thanh lý
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPrintingContract(contract)}
+                      >
+                        In HĐ
                       </Button>
                       <Button
                         variant="outline"
@@ -659,6 +707,15 @@ export function ContractListPage() {
           onClose={() => setSelectedContract(null)}
           onRefresh={fetchContracts}
           residents={residents}
+          rooms={rooms}
+        />
+      )}
+
+      {printingContract && (
+        <ContractTemplateModal
+          isOpen={!!printingContract}
+          onClose={() => setPrintingContract(null)}
+          contract={printingContract}
         />
       )}
 

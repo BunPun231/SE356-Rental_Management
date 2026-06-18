@@ -17,6 +17,8 @@ export interface ContractResult {
   depositStatus: "PENDING" | "UNPAID" | "HOLDING" | "PAID" | "REFUNDED" | "DEDUCTED";
   status: "ACTIVE" | "DRAFT" | "PENDING_LIQUIDATION" | "LIQUIDATED" | "CANCELLED" | "CANCELED";
   billingDate?: string;
+  billingCycleDay?: number;
+  paymentCycleMonths?: number;
   intendedMoveOutDate?: string;
   pdfUrl?: string;
   createdAt?: string;
@@ -46,10 +48,14 @@ export interface ContractCreateRequest {
   primaryResidentFullName?: string;
   primaryResidentEmail?: string;
   primaryResidentIdCardNumber?: string;
+  primaryResidentIdCardFrontUrl?: string;
+  primaryResidentIdCardBackUrl?: string;
   startDate: string;
   endDate: string;
-  /** billingDate: day of month when rent is due (YYYY-MM-DD) */
-  billingDate: string;
+  /** billingDate: day of month when rent is due (optional) */
+  billingDate?: string;
+  billingCycleDay?: number;
+  paymentCycleMonths?: number;
   rentPrice: number;
   depositAmount: number;
   /** UNPAID | PAID */
@@ -186,13 +192,12 @@ export const contractService = {
     await api.post(`/api/contracts/${contractId}/deposit/refund`, { notes });
   },
 
-  /** UC80: Calculate settlement */
   async calculateSettlement(data: SettlementRequest): Promise<SettlementCalculateResult> {
-    const res = await api.post<ApiResponse<SettlementCalculateResult>>(
+    const res = await api.post<SettlementCalculateResult>(
       "/api/v1/settlements/calculate",
       data
     );
-    return res.data.data;
+    return res.data;
   },
 
   /** UC80: Confirm settlement */

@@ -11,7 +11,7 @@ export interface ServiceResult {
   id: number;
   motelId: number;
   name: string;
-  chargeType: "FIXED" | "METERED" | "TIERED" | "PER_PERSON" | "PER_INDEX" | "PER_QUANTITY";
+  chargeType: "FIXED" | "METERED" | "PER_PERSON" | "PER_INDEX" | "PER_QUANTITY" | "TIERED";
   unit?: string;
   mandatory: boolean;
   basePrice?: number;
@@ -83,7 +83,7 @@ export const serviceService = {
   },
 
   /** UC37+: Get services assigned to a specific room */
-  async listByRoom(motelId: number, roomId: number): Promise<ServiceResult[]> {
+  async listByRoom(motelId: number, roomId: number | string): Promise<ServiceResult[]> {
     const res = await api.get<ApiResponse<ServiceResult[]>>(
       `/api/motels/${motelId}/services/by-room/${roomId}`
     );
